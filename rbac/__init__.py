@@ -1,14 +1,13 @@
+"""RBAC decorators and utilities"""
 from functools import wraps
-from flask import request, jsonify, g
+from flask import request, jsonify
 from flask_login import current_user
 from models.audit import AuditLog
 from models.user import db
 
+
 def require_permission(permission_name):
-    """
-    Decorator to check if user has a specific permission
-    Usage: @require_permission('create_request')
-    """
+    """Decorator to check if user has a specific permission"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -29,11 +28,9 @@ def require_permission(permission_name):
         return decorated_function
     return decorator
 
+
 def require_role(role_name):
-    """
-    Decorator to check if user has a specific role
-    Usage: @require_role('admin')
-    """
+    """Decorator to check if user has a specific role"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -41,13 +38,6 @@ def require_role(role_name):
                 return jsonify({'error': 'Authentication required'}), 401
             
             if not current_user.has_role(role_name):
-                AuditLog.log_action(
-                    user_id=current_user.id,
-                    action=f'role_check_failed:{role_name}',
-                    success=False,
-                    error_message='Required role not found'
-                )
-                db.session.commit()
                 return jsonify({'error': 'Required role not found'}), 403
             
             return f(*args, **kwargs)
@@ -55,58 +45,33 @@ def require_role(role_name):
     return decorator
 
 def check_resource_access(user, resource_type, resource_id, action='read'):
-    """
-    Check if user has access to a specific resource
-    
-    Args:
-        user: User object
-        resource_type: Type of resource (e.g., 'request', 'report')
-        resource_id: ID of the resource
-        action: Action to perform (read, write, delete)
-    
-    Returns:
-        bool: True if user has access, False otherwise
-    """
-    # Check general permission
+    """Check if user has access to a specific resource"""
     permission_name = f'{action}_{resource_type}'
     if user.has_permission(permission_name):
         return True
     
-    # Resource-specific access checks
     if resource_type == 'request':
         from models.request import Request
         resource = Request.query.get(resource_id)
         if resource:
-            # User is the requester
-            if resource.requester_id == user.id:
-                return True
-            # User is assigned to the request
-            if resource.assigned_to_id == user.id:
-                return True
-            # User is an approver in the history
-            if any(approval.approver_id == user.id for approval in resource.approvals):
+            if (resource.requester_id == user.id or 
+                resource.assigned_to_id == user.id or
+                any(approval.approver_id == user.id for approval in resource.approvals)):
                 return True
     
     return False
 
 def audit_action(action, resource_type=None, resource_id=None):
-    """
-    Decorator to automatically log actions in audit trail
-    Usage: @audit_action('create_request', 'request')
-    """
+    """Decorator to automatically log actions in audit trail"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            # Execute the function
             result = f(*args, **kwargs)
             
-            # Log the action
             if current_user.is_authenticated:
                 try:
-                    # Determine resource_id from kwargs or result
                     res_id = resource_id
                     if res_id is None and isinstance(result, tuple):
-                        # Try to extract from response
                         response_data = result[0].get_json() if hasattr(result[0], 'get_json') else None
                         if response_data and 'id' in response_data:
                             res_id = response_data['id']
@@ -118,15 +83,12 @@ def audit_action(action, resource_type=None, resource_id=None):
                         resource_id=res_id,
                         details={
                             'endpoint': request.endpoint,
-                            'method': request.method,
-                            'args': str(args),
-                            'kwargs': str(kwargs)
+                            'method': request.method
                         }
                     )
                     db.session.commit()
-                except Exception as e:
-                    # Don't fail the request if audit logging fails
-                    print(f"Audit logging failed: {str(e)}")
+                except Exception:
+                    pass
             
             return result
         return decorated_function

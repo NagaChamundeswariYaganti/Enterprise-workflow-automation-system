@@ -70,101 +70,60 @@ def create_app(config_name='development'):
 def init_db(app):
     """Initialize database with tables and seed data"""
     with app.app_context():
-        # Create all tables
         db.create_all()
         
         # Create default permissions
-        permissions_data = [
+        permissions = [
             ('create_request', 'Create a new request', 'request', 'create'),
             ('read_request', 'View own requests', 'request', 'read'),
             ('update_request', 'Update own requests', 'request', 'update'),
             ('delete_request', 'Delete own requests', 'request', 'delete'),
             ('approve_request', 'Approve requests', 'request', 'approve'),
-            ('view_all_requests', 'View all requests in system', 'request', 'read'),
+            ('view_all_requests', 'View all requests', 'request', 'read'),
             ('update_any_request', 'Update any request', 'request', 'update'),
-            ('assign_request', 'Assign requests to users', 'request', 'manage'),
+            ('assign_request', 'Assign requests', 'request', 'manage'),
             ('cancel_any_request', 'Cancel any request', 'request', 'manage'),
             ('manage_users', 'Manage users', 'user', 'manage'),
             ('manage_roles', 'Manage roles', 'role', 'manage'),
             ('view_audit_logs', 'View audit logs', 'audit', 'read'),
         ]
         
-        for perm_name, perm_desc, resource, action in permissions_data:
-            if not Permission.query.filter_by(name=perm_name).first():
-                permission = Permission(
-                    name=perm_name,
-                    description=perm_desc,
-                    resource=resource,
-                    action=action
-                )
-                db.session.add(permission)
-        
+        for name, desc, resource, action in permissions:
+            if not Permission.query.filter_by(name=name).first():
+                db.session.add(Permission(
+                    name=name, description=desc, resource=resource, action=action
+                ))
         db.session.commit()
         
         # Create default roles
-        # Admin role
-        admin_role = Role.query.filter_by(name='admin').first()
-        if not admin_role:
-            admin_role = Role(
-                name='admin',
-                description='System administrator with full access',
-                level=10,
-                can_approve=True
-            )
-            db.session.add(admin_role)
-            db.session.commit()
+        roles_config = [
+            ('admin', 'System administrator', 10, True, None, 'all'),
+            ('manager', 'Manager with approval authority', 5, True, 10000.0, 
+             ['approve_request', 'view_all_requests', 'assign_request', 
+              'create_request', 'read_request', 'update_request']),
+            ('employee', 'Regular employee', 1, False, None,
+             ['create_request', 'read_request', 'update_request', 'delete_request']),
+        ]
+        
+        for name, desc, level, can_approve, limit, perms in roles_config:
+            role = Role.query.filter_by(name=name).first()
+            if not role:
+                role = Role(name=name, description=desc, level=level, 
+                           can_approve=can_approve, approval_limit=limit)
+                db.session.add(role)
+                db.session.commit()
             
-            # Assign all permissions to admin
-            all_permissions = Permission.query.all()
-            for perm in all_permissions:
-                admin_role.permissions.append(perm)
+            if perms == 'all':
+                role.permissions = Permission.query.all()
+            else:
+                for perm_name in perms:
+                    perm = Permission.query.filter_by(name=perm_name).first()
+                    if perm and perm not in role.permissions:
+                        role.permissions.append(perm)
             db.session.commit()
         
-        # Manager role
-        manager_role = Role.query.filter_by(name='manager').first()
-        if not manager_role:
-            manager_role = Role(
-                name='manager',
-                description='Manager with approval authority',
-                level=5,
-                can_approve=True,
-                approval_limit=10000.0
-            )
-            db.session.add(manager_role)
-            db.session.commit()
-            
-            # Assign manager permissions
-            manager_perms = ['approve_request', 'view_all_requests', 'assign_request', 
-                           'create_request', 'read_request', 'update_request']
-            for perm_name in manager_perms:
-                perm = Permission.query.filter_by(name=perm_name).first()
-                if perm:
-                    manager_role.permissions.append(perm)
-            db.session.commit()
-        
-        # Employee role
-        employee_role = Role.query.filter_by(name='employee').first()
-        if not employee_role:
-            employee_role = Role(
-                name='employee',
-                description='Regular employee',
-                level=1,
-                can_approve=False
-            )
-            db.session.add(employee_role)
-            db.session.commit()
-            
-            # Assign employee permissions
-            employee_perms = ['create_request', 'read_request', 'update_request', 'delete_request']
-            for perm_name in employee_perms:
-                perm = Permission.query.filter_by(name=perm_name).first()
-                if perm:
-                    employee_role.permissions.append(perm)
-            db.session.commit()
-        
-        print("Database initialized successfully!")
-        print(f"Permissions created: {Permission.query.count()}")
-        print(f"Roles created: {Role.query.count()}")
+        print(f"Database initialized: {Permission.query.count()} permissions, "
+              f"{Role.query.count()} roles")
 
 if __name__ == '__main__':
     # Create app
